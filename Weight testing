@@ -1,0 +1,98 @@
+#include "HX711.h"
+
+//——— HX711 pins ——
+#define DOUT  32
+#define CLK   33
+
+HX711 scale;
+
+// Kalman filter variables
+double x = 0.0;
+double P = 1e4;
+double Q = 1e-3;
+double R = pow(0.00015, 2);
+double last_measurement = 0.0;
+double some_threshold = 100.0;
+
+const double weight_present_threshold = 20.0; // Lower for faster wake-up
+const double dead_zone = 5.0; // Dead zone around zero to ignore small fluctuations
+const int wakeup_poll_interval = 20; // ms, very fast check
+bool is_sleeping = false;
+int empty_count = 0;
+const int empty_limit = 3;
+
+void setup() {
+  Serial.begin(115200);
+  scale.begin(DOUT, CLK);
+  scale.set_scale(137.37); // YOUR calibration factor!
+  // Triple tare for reliability
+  scale.tare(); delay(500);
+  scale.tare(); delay(500);
+  scale.tare(); delay(500);
+  Serial.println("Scale ready.");
+}
+
+void loop() {
+  if (is_sleeping) {
+    // Use a single raw measurement for instant detection!
+    double z = scale.get_units(1); // Just 1 sample
+    if (abs(z) > weight_present_threshold) {
+      Serial.println("Weight detected! Waking up...");
+      is_sleeping = false;
+      empty_count = 0;
+      // Take an immediate, stable first reading and show it!
+      double initial_weight = scale.get_units(10); // Average for output
+      Serial.print("First wake-up weight: ");
+      Serial.println(initial_weight, 2);
+      last_measurement = initial_weight;
+      x = initial_weight;
+      delay(100); // Give user time to see first output
+    } else {
+      delay(wakeup_poll_interval);
+    }
+    return;
+  }
+
+  if (scale.is_ready()) {
+    double z = scale.get_units(10); // Stable averaging
+    double delta_z = fabs(z - last_measurement);
+    last_measurement = z;
+
+    // Sleep logic with hysteresis and dead zone
+    if (abs(z) < weight_present_threshold) {
+      empty_count++;
+      x = 0; // Force zero immediately when empty
+      if (empty_count >= empty_limit) {
+        P = 1e4;
+        Serial.println("No weight detected. Entering sleep mode...");
+        is_sleeping = true;
+        delay(100);
+        return;
+      }
+    } else {
+      empty_count = 0;
+
+      // Kalman filter with dead zone adjustment
+      if (fabs(z) < dead_zone) {
+        x = 0; // Ignore small fluctuations
+      } else {
+        if (delta_z > some_threshold) Q = 1e-3;
+        else Q = 1e-6;
+        double x_pred = x;
+        double P_pred = P + Q;
+        double K = P_pred / (P_pred + R);
+        x = x_pred + K * (z - x_pred);
+        P = (1.0 - K) * P_pred;
+      }
+    }
+
+    // Print readings
+    Serial.print("Raw: "); Serial.print(z, 3);
+    Serial.print(" g | Estimate: "); Serial.print(x, 3);
+    Serial.println(" g");
+  } else {
+    Serial.println("HX711 not found.");
+  }
+
+  delay(100); // Normal update rate
+}
