@@ -1,0 +1,53 @@
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 22      // Configurable
+#define SS_PIN  5       // Configurable
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  mfrc522.PCD_Init();
+  Serial.println("Approximate your card to the reader …");
+}
+
+void loop() {
+  // Look for new cards
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+
+  // Select one of the cards
+  if (!mfrc522.PICC_ReadCardSerial()) return;
+
+  // Read and format the UID
+  String uid = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    byte b = mfrc522.uid.uidByte[i];
+    if (b < 0x10) {
+      uid += "0";
+      Serial.print("0");
+    }
+    Serial.print(b, HEX);
+    uid += String(b, HEX);
+    if (i < mfrc522.uid.size - 1) {
+      Serial.print(" ");
+      uid += " ";
+    }
+  }
+  Serial.println();
+  uid.toUpperCase();
+
+  // Echo it back
+  Serial.print("UID: ");
+  Serial.println(uid);
+
+  // Authorization check
+  if (uid == "0A 6E BC 81") {
+    Serial.println("Pengugine with this UID just stepped on the platform");
+  } else {
+    Serial.println("Nothing on the scale");
+  }
+
+  delay(3000);
+}
