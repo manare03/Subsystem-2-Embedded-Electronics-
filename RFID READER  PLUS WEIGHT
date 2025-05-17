@@ -1,0 +1,101 @@
+#include <SPI.h>
+#include <MFRC522.h>
+#include "HX711.h"
+
+//——— RFID pins ———
+#define RST_PIN   22
+#define SS_PIN     5
+
+//——— HX711 pins ——
+#define DOUT_PIN  32    // (moved off flash-bus)
+#define CLK_PIN   33
+
+//——— Calibration & thresholds ——
+const float  CALIBRATION_FACTOR = 137.37;
+const uint8_t WEIGHT_SAMPLES     = 10;      // for quick ready-check
+const char*   AUTHORIZED_UID     = "0A 6E BC 81";
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+HX711  scale;
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {}
+
+  // RFID init
+  SPI.begin();
+  mfrc522.PCD_Init();
+  Serial.println(F("RFID + Scale system ready."));
+  Serial.println(F("Present your penguine tag…"));
+
+  // Scale init & tare
+  scale.begin(DOUT_PIN, CLK_PIN);
+  scale.set_scale(CALIBRATION_FACTOR);
+  for (int i = 0; i < 3; i++) {
+    scale.tare();
+    delay(500);
+  }
+  Serial.println(F("Scale calibrated."));
+  Serial.println();
+}
+
+void loop() {
+  //——— RFID check ——
+  if (!mfrc522.PICC_IsNewCardPresent()) return;
+  if (!mfrc522.PICC_ReadCardSerial()) return;
+
+  //——— Read UID ——
+  String uid;
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    byte b = mfrc522.uid.uidByte[i];
+    if (b < 0x10) { Serial.print('0'); uid += '0'; }
+    Serial.print(b, HEX);
+    uid += String(b, HEX);
+    if (i < mfrc522.uid.size - 1) {
+      Serial.print(' ');
+      uid += ' ';
+    }
+  }
+  Serial.println();
+  uid.toUpperCase();
+
+  Serial.print(F("UID: "));
+  Serial.println(uid);
+
+  if (uid == AUTHORIZED_UID) {
+    Serial.println(F("✅ Authorized penguine detected!"));
+    if (!scale.is_ready()) {
+      Serial.println(F("⚠  HX711 not found."));
+    } 
+    else {
+      //——— 3 s Averaging Window ——
+      unsigned long t0 = millis();
+      float sum = 0;
+      int   cnt = 0;
+
+      while (millis() - t0 < 3000UL) {
+        // quick check so we don’t block if module isn't ready
+        if (scale.is_ready()) {
+          float w = scale.get_units(1);
+          sum += w;
+          cnt++;
+        }
+        delay(50);  // sample every 50 ms → ~60 samples in 3 s
+      }
+
+      float avg = (cnt>0) ? sum / cnt : 0.0;
+      Serial.print(F("   3s average weight: "));
+      Serial.print(avg, 2);
+      Serial.println(F(" g"));
+    }
+  } 
+  else {
+    Serial.println(F("❌ Unauthorized tag."));
+  }
+
+  //——— cleanup ——
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+  Serial.println();
+  delay(3000);
+}
