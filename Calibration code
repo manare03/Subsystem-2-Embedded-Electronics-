@@ -1,0 +1,59 @@
+#include "HX711.h"
+
+//——— HX711 wiring ——
+#define DOUT_PIN  32   // data
+#define CLK_PIN   33   // clock
+
+HX711 scale;
+float calibrationFactor = 1.0;  // will be recalculated
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {}
+
+  // Initialize & tare
+  scale.begin(DOUT_PIN, CLK_PIN);
+  scale.set_scale(calibrationFactor);
+  Serial.println(F("HX711 Calibration Utility"));
+  Serial.println(F("--------------------------"));
+  Serial.println(F("Taring..."));
+  for (int i = 0; i < 3; i++) {
+    scale.tare();
+    delay(500);
+  }
+
+  // Ask the user for the known mass
+  Serial.println();
+  Serial.println(F("Place your KNOWN mass on the scale."));
+  Serial.println(F("Then type its weight in grams and press Enter:"));
+
+  // Wait for input
+  while (!Serial.available()) {
+    delay(10);
+  }
+  float knownMass = Serial.parseFloat();
+  Serial.print(F("You entered: "));
+  Serial.print(knownMass, 2);
+  Serial.println(F(" g"));
+  delay(500);
+
+  // Read raw units (average 10 samples)
+  float raw = scale.get_units(10);
+  Serial.print(F("Raw average reading: "));
+  Serial.println(raw, 2);
+
+  // Compute & apply new calibration factor
+  calibrationFactor = raw / knownMass;
+  scale.set_scale(calibrationFactor);
+
+  Serial.println();
+  Serial.print(F("→ New calibration factor = "));
+  Serial.println(calibrationFactor, 4);
+  Serial.println(F("--------------------------"));
+  Serial.println(F("Now you can upload your main sketch,"));
+  Serial.println(F("using this calibrationFactor value."));
+}
+
+void loop() {
+  // Nothing to do here.
+}
